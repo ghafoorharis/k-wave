@@ -1,3 +1,49 @@
+function [sound_speed_map, density_map, scattering_bezier] = define_phantom_with_bezier(c0, rho0, Nx_tot, Ny_tot, Nz_tot, dx, bg_mean, bg_std, bezier_points, scattering_mean, scattering_std, scattering_divider)
+    % Generate 3D grid for the phantom
+    [X, Y, Z] = meshgrid(1:Ny_tot, 1:Nx_tot, 1:Nz_tot);
+    X = X * dx; 
+    Y = Y * dx; 
+    Z = Z * dx; 
+
+    % Generate Bezier curve points
+    t = linspace(0, 1, 1000); % Parameter for the curve
+    P = zeros(length(t), 3); % Store 3D points for the curve
+    n = size(bezier_points, 1) - 1; % Degree of the Bezier curve
+
+    for i = 0:n
+        % Bernstein polynomial
+        B = nchoosek(n, i) * (1 - t).^(n - i) .* t.^i;
+        P = P + B' * bezier_points(i + 1, :);
+    end
+
+    % Map Bezier curve points to the grid
+    bezier_mask = false(Nx_tot, Ny_tot, Nz_tot);
+    for i = 1:size(P, 1)
+        x_idx = round(P(i, 1) / dx);
+        y_idx = round(P(i, 2) / dx);
+        z_idx = round(P(i, 3) / dx);
+        
+        % Ensure grid indexing starts from 1
+        x_idx = max(min(x_idx, Nx_tot), 1);
+        y_idx = max(min(y_idx, Ny_tot), 1);
+        z_idx = max(min(z_idx, Nz_tot), 1);
+        
+        bezier_mask(x_idx, y_idx, z_idx) = true;
+
+    end
+
+    % Define sound speed and density maps
+    sound_speed_map = bg_mean + bg_std * randn(Nx_tot, Ny_tot, Nz_tot);
+    density_map = rho0 + bg_std * randn(Nx_tot, Ny_tot, Nz_tot);
+
+    % Define scattering properties along the Bezier curve
+    scattering_bezier = scattering_mean + scattering_std * randn(Nx_tot, Ny_tot, Nz_tot);
+    scattering_bezier(~bezier_mask) = 0; % Set outside the Bezier curve region to zero
+
+    % Apply additional scaling if needed
+    scattering_bezier = scattering_bezier / scattering_divider;
+end
+
 % Simulating B-mode Ultrasound Images Example
 %
 % This example illustrates how k-Wave can be used for the simulation of
@@ -51,7 +97,7 @@
 clearvars;
 
 % simulation settings
-DATA_CAST       = 'single';     % set to 'single' or 'gpuArray-single' to speed up computations
+DATA_CAST       = 'gpuArray-single';     % set to 'single' or 'gpuArray-single' to speed up computations
 RUN_SIMULATION  = true;         % set to false to reload previous results instead of running simulation
 
 % =========================================================================
@@ -69,7 +115,7 @@ Ny = 128 - 2 * pml_y_size;      % [grid points]
 Nz = 128 - 2 * pml_z_size;      % [grid points]
 
 % set desired grid size in the x-direction not including the PML
-x = 40e-3;                      % [m]
+x = 40-3;                      % [m]
 
 % calculate the spacing between the grid points
 dx = x / Nx;                    % [m]
@@ -163,7 +209,7 @@ Nz_tot = Nz;
 
 % define a random distribution of scatterers for the medium
 background_map_mean = 1;
-background_map_std = 0.008;
+background_map_std = 0.2;
 background_map = background_map_mean + background_map_std * randn([Nx_tot, Ny_tot, Nz_tot]);
 
 % define a random distribution of scatterers for the highly scattering
@@ -182,31 +228,57 @@ density_map = rho0 * ones(Nx_tot, Ny_tot, Nz_tot) .* background_map;
 radius = 6e-3;      % [m]
 x_pos = 27.5e-3;    % [m]
 y_pos = 20.5e-3;    % [m]
+% Initialize a blank grid
+bezier_mask = zeros(Nx_tot, Ny_tot, Nz_tot);
 scattering_region1 = makeBall(Nx_tot, Ny_tot, Nz_tot, round(x_pos/dx), round(y_pos/dx), Nz_tot/2, round(radius/dx));
+% Rasterize Bézier curve (map curve points to grid)
+% Define control points for the Bézier curve
+% control_points = [15, 30; 20, 35; 25, 25; 30, 30]; % Example control points (x, y)
+bezier_points = [
+    5e-3, 5e-3, 0; % Control point 1
+    10e-3, 15e-3, 0; % Control point 2
+    20e-3, 25e-3, 0; % Control point 3
+    30e-3, 30e-3, 0  % Control point 4
+];
+scattering_mean_c1 = 0.01;
+scattering_std_c2 = 0.1;
+scattering_divider_c3 = 25;
+% [sound_speed_map, density_map, scattering_bezier] = define_phantom_with_bezier( ...
+%     c0, rho0, ...
+%     Nx_tot, Ny_tot, Nz_tot, dx, ...
+%     background_map_mean, ...
+%     background_map_std, ...
+%     bezier_points, ...
+%     scattering_mean_c1, ...
+%     scattering_std_c2, ...
+%     scattering_divider_c3);
 
+% Assign properties to the Bézier-defined region
+% sound_speed_map(bezier_mask == 1) = scattering_c0(bezier_mask == 1);
+% density_map(bezier_mask == 1) = scattering_rho0(bezier_mask == 1);
 % assign region
 sound_speed_map(scattering_region1 == 1) = scattering_c0(scattering_region1 == 1);
 density_map(scattering_region1 == 1) = scattering_rho0(scattering_region1 == 1);
 
-% define a sphere for a highly scattering region
-radius = 5e-3;      % [m]
-x_pos = 30.5e-3;    % [m]
-y_pos = 37e-3;      % [m]
-scattering_region2 = makeBall(Nx_tot, Ny_tot, Nz_tot, round(x_pos/dx), round(y_pos/dx), Nz_tot/2, round(radius/dx));
+% % define a sphere for a highly scattering region
+% radius = 5e-3;      % [m]
+% x_pos = 30.5e-3;    % [m]
+% y_pos = 37e-3;      % [m]
+% scattering_region2 = makeBall(Nx_tot, Ny_tot, Nz_tot, round(x_pos/dx), round(y_pos/dx), Nz_tot/2, round(radius/dx));
+% 
+% % assign region
+% sound_speed_map(scattering_region2 == 1) = scattering_c0(scattering_region2 == 1);
+% density_map(scattering_region2 == 1) = scattering_rho0(scattering_region2 == 1);
+% 
+% % define a sphere for a highly scattering region
+% radius = 4.5e-3;    % [m]
+% x_pos = 15.5e-3;    % [m]
+% y_pos = 30.5e-3;    % [m]
+% scattering_region3 = makeBall(Nx_tot, Ny_tot, Nz_tot, round(x_pos/dx), round(y_pos/dx), Nz_tot/2, round(radius/dx));
 
 % assign region
-sound_speed_map(scattering_region2 == 1) = scattering_c0(scattering_region2 == 1);
-density_map(scattering_region2 == 1) = scattering_rho0(scattering_region2 == 1);
-
-% define a sphere for a highly scattering region
-radius = 4.5e-3;    % [m]
-x_pos = 15.5e-3;    % [m]
-y_pos = 30.5e-3;    % [m]
-scattering_region3 = makeBall(Nx_tot, Ny_tot, Nz_tot, round(x_pos/dx), round(y_pos/dx), Nz_tot/2, round(radius/dx));
-
-% assign region
-sound_speed_map(scattering_region3 == 1) = scattering_c0(scattering_region3 == 1);
-density_map(scattering_region3 == 1) = scattering_rho0(scattering_region3 == 1);
+% sound_speed_map(scattering_region3 == 1) = scattering_c0(scattering_region3 == 1);
+% density_map(scattering_region3 == 1) = scattering_rho0(scattering_region3 == 1);
 
 % =========================================================================
 % RUN THE SIMULATION
@@ -250,12 +322,12 @@ if RUN_SIMULATION
     end
 
     % save the scan lines to disk
-    save example_us_bmode_scan_lines scan_lines;
+    save example_us_bmode_scan_lines_low_resolution scan_lines;
     
 else
     
     % load the scan lines from disk
-    load example_us_bmode_scan_lines;
+    load example_us_bmode_scan_lines_low_resolution;
     
 end
 
@@ -367,10 +439,10 @@ xlabel('Horizontal Position [mm]');
 ylabel('Depth [mm]');
 
 % plot the processing steps
-figure;
-stackedPlot(kgrid.t_array * 1e6, {'1. Beamformed Signal', '2. Time Gain Compensation', '3. Frequency Filtering', '4. Envelope Detection', '5. Log Compression'}, scan_line_example);
-xlabel('Time [\mus]');
-set(gca, 'XLim', [5, t_end * 1e6]);
+% figure;
+% stackedPlot(kgrid.t_array * 1e6, {'1. Beamformed Signal', '2. Time Gain Compensation', '3. Frequency Filtering', '4. Envelope Detection', '5. Log Compression'}, scan_line_example);
+% xlabel('Time [\mus]');
+% set(gca, 'XLim', [5, t_end * 1e6]);
 
 % plot the processed b-mode ultrasound image
 figure;
@@ -397,25 +469,25 @@ ylabel('Depth [mm]');
 % VISUALISATION OF SIMULATION LAYOUT
 % =========================================================================
 
-% % uncomment to generate a voxel plot of the simulation layout
-% 
-% % physical properties of the transducer
-% transducer_plot.number_elements = 32 + number_scan_lines - 1;
-% transducer_plot.element_width = 2;
-% transducer_plot.element_length = 24;
-% transducer_plot.element_spacing = 0;
-% transducer_plot.radius = inf;
-% 
-% % transducer position
-% transducer_plot.position = round([1, Ny/2 - transducer_width/2, Nz/2 - transducer.element_length/2]);
-% 
-% % create expanded grid
-% kgrid_plot = kWaveGrid(Nx_tot, dx, Ny_tot, dy, Nz, dz);
-% kgrid_plot.setTime(1, 1);
-% 
-% % create the transducer using the defined settings
-% transducer_plot = kWaveTransducer(kgrid_plot, transducer_plot);
-% 
-% % create voxel plot of transducer mask and 
-% voxelPlot(single(transducer_plot.active_elements_mask | scattering_region1 | scattering_region2 | scattering_region3));
-% view(26, 48);
+% uncomment to generate a voxel plot of the simulation layout
+
+% physical properties of the transducer
+transducer_plot.number_elements = 32 + number_scan_lines - 1;
+transducer_plot.element_width = 2;
+transducer_plot.element_length = 24;
+transducer_plot.element_spacing = 0;
+transducer_plot.radius = inf;
+
+% transducer position
+transducer_plot.position = round([1, Ny/2 - transducer_width/2, Nz/2 - transducer.element_length/2]);
+
+% create expanded grid
+kgrid_plot = kWaveGrid(Nx_tot, dx, Ny_tot, dy, Nz, dz);
+kgrid_plot.setTime(1, 1);
+
+% create the transducer using the defined settings
+transducer_plot = kWaveTransducer(kgrid_plot, transducer_plot);
+
+% create voxel plot of transducer mask and 
+voxelPlot(single(transducer_plot.active_elements_mask | scattering_region1 | scattering_region2 | scattering_region3));
+view(26, 48);

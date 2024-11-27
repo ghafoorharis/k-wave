@@ -48,7 +48,7 @@ pml_y_size = 10;                % [grid points]
 pml_z_size = 10;                % [grid points]
 
 % set total number of grid points not including the PML
-sc = 1;
+sc = 4;
 Nx = 256/sc - 2*pml_x_size;     % [grid points]
 Ny = 256/sc - 2*pml_y_size;     % [grid points]
 Nz = 128/sc - 2*pml_z_size;     % [grid points]

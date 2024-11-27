@@ -1,0 +1,24 @@
+function [sound_speed_map, density_map, scattering_circle] = define_phantom(c0, ...
+            rho0, Nx_tot, Ny_tot, ...
+            Nz_tot, dx, x_shift, ...
+            y_shift,background_map_mean, ...
+            background_map_std, ...
+            radius, ...
+            x_pos,y_pos)
+    background_map = background_map_mean + background_map_std * randn([Nx_tot, Ny_tot, Nz_tot]);
+    
+    scattering_map = randn([Nx_tot, Ny_tot, Nz_tot]);
+    scattering_c0 = c0 + 25 + 75 * scattering_map;
+    scattering_rho0 = scattering_c0 / 1.5;
+    
+    sound_speed_map = c0 * ones(Nx_tot, Ny_tot, Nz_tot) .* background_map;
+    density_map = rho0 * ones(Nx_tot, Ny_tot, Nz_tot) .* background_map;
+    
+    radius = 6e-3; % [m]
+    x_pos = 25e-3 + x_shift;
+    y_pos = 30e-3 + y_shift;
+    scattering_circle = makeBall(Nx_tot, Ny_tot, Nz_tot, round(x_pos/dx), round(y_pos/dx), Nz_tot/2, round(radius/dx));
+    
+    sound_speed_map(scattering_circle == 1) = scattering_c0(scattering_circle == 1);
+    density_map(scattering_circle == 1) = scattering_rho0(scattering_circle == 1);
+end

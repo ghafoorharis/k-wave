@@ -1,0 +1,5 @@
+function input_signal = define_input_signal(kgrid, c0, rho0,source_strength,tone_burst_freq,tone_burst_cycles)
+
+    input_signal = toneBurst(1 / kgrid.dt, tone_burst_freq, tone_burst_cycles);
+    input_signal = (source_strength / (c0 * rho0)) * input_signal; % Scale signal
+end
